@@ -1,50 +1,81 @@
 import os
+import uuid
+from datetime import datetime
 
 import boto3
+import srl
 from flask import Flask, jsonify, make_response, request
 
 app = Flask(__name__)
 
+dynamodb_client = boto3.client("dynamodb")
 
-dynamodb_client = boto3.client('dynamodb')
+TODOS_TABLE = os.environ["TODOS_TABLE"]
 
-if os.environ.get('IS_OFFLINE'):
-    dynamodb_client = boto3.client(
-        'dynamodb', region_name='localhost', endpoint_url='http://localhost:8000'
+
+@app.route("/todos", methods=["GET"])
+def getTodos():
+    result = dynamodb_client.scan(TableName=TODOS_TABLE)
+
+    items = result.get("Items")
+    deserialized = []
+
+    for item in items:
+        ds_item = srl.deserialize(item)
+        print(ds_item)
+
+        deserialized.append(ds_item)
+
+    count = result.get("Count")
+
+    return jsonify({"data": deserialized, "count": count})
+
+
+@app.route("/todos", methods=["POST"])
+def createTodo():
+    body = request.json
+
+    id = uuid.uuid4()
+    content = body.get("content")
+    createdAt = datetime.now().isoformat()
+
+    todo = {
+        "id": str(id),
+        "content": content,
+        "createdAt": createdAt,
+    }
+
+    serialized = srl.serialize(todo)
+
+    dynamodb_client.put_item(TableName=TODOS_TABLE, Item=serialized)
+
+    return (
+        jsonify({"data": todo}),
+        201,
     )
 
 
-USERS_TABLE = os.environ['USERS_TABLE']
+@app.route("/todos/<id>", methods=["PATCH"])
+def updateTodo(id):
+    body = request.json
+    content = body.get("content")
 
-
-@app.route('/users/<string:user_id>')
-def get_user(user_id):
-    result = dynamodb_client.get_item(
-        TableName=USERS_TABLE, Key={'userId': {'S': user_id}}
-    )
-    item = result.get('Item')
-    if not item:
-        return jsonify({'error': 'Could not find user with provided "userId"'}), 404
-
-    return jsonify(
-        {'userId': item.get('userId').get('S'), 'name': item.get('name').get('S')}
+    dynamodb_client.update_item(
+        TableName=TODOS_TABLE,
+        Key=srl.serialize({"id": id}),
+        UpdateExpression="SET content = :content",
+        ExpressionAttributeValues=srl.serialize({":content": content}),
     )
 
+    return jsonify({"success": True, "content": content})
 
-@app.route('/users', methods=['POST'])
-def create_user():
-    user_id = request.json.get('userId')
-    name = request.json.get('name')
-    if not user_id or not name:
-        return jsonify({'error': 'Please provide both "userId" and "name"'}), 400
 
-    dynamodb_client.put_item(
-        TableName=USERS_TABLE, Item={'userId': {'S': user_id}, 'name': {'S': name}}
-    )
-
-    return jsonify({'userId': user_id, 'name': name})
+@app.route("/todos/<id>", methods=["DELETE"])
+def deleteTodo(id):
+    dynamodb_client.delete_item(TableName=TODOS_TABLE, Key=srl.serialize({"id": id}))
+    return jsonify({"success": True})
 
 
 @app.errorhandler(404)
-def resource_not_found(e):
-    return make_response(jsonify(error='Not found!'), 404)
+def resourceNotFound(e):
+    return make_response(jsonify(error="Not found!"), 404)

@@ -5,13 +5,14 @@ service: todolist-sls
 frameworkVersion: '3'
 
 custom:
-  tableName: 'users-table-${sls:stage}'
+  tableName: 'todos-table-${sls:stage}'
   wsgi:
     app: app.app
 
 provider:
   name: aws
   runtime: python3.9
+  region: ap-southeast-1
   iam:
     role:
       statements:
@@ -24,9 +25,10 @@ provider:
             - dynamodb:UpdateItem
             - dynamodb:DeleteItem
           Resource:
-            - Fn::GetAtt: [ UsersTable, Arn ]
+            - Fn::GetAtt: [ TodosTable, Arn ]
   environment:
-    USERS_TABLE: ${self:custom.tableName}
+    TODOS_TABLE: ${self:custom.tableName}
+    AW: ${self:custom.tableName}
 
 functions:
   api:
@@ -37,17 +39,17 @@ functions:
 plugins:
   - serverless-wsgi
   - serverless-python-requirements
-
+  - serverless-dynamodb-local
 resources:
   Resources:
-    UsersTable:
+    TodosTable:
       Type: AWS::DynamoDB::Table
       Properties:
         AttributeDefinitions:
-          - AttributeName: userId
+          - AttributeName: id
             AttributeType: S
         KeySchema:
-          - AttributeName: userId
+          - AttributeName: id
             KeyType: HASH
         ProvisionedThroughput:
           ReadCapacityUnits: 1
